@@ -33,16 +33,28 @@ Author: GitHub Environment Management Team
 import argparse
 import sys
 
-from ghenv.ghenv_lib import (
-    check_secret_exists,
-    check_variable_exists,
-    find_files_by_extension,
-    get_environment_secrets,
-    get_environment_variables,
-    read_variable_names,
-    setup_logging,
-    validate_environment,
-)
+try:
+    from .ghenv_lib import (
+        check_secret_exists,
+        check_variable_exists,
+        find_files_by_extension,
+        get_environment_secrets,
+        get_environment_variables,
+        read_variable_names,
+        setup_logging,
+        validate_environment,
+    )
+except ImportError:
+    from ghenv_lib import (
+        check_secret_exists,
+        check_variable_exists,
+        find_files_by_extension,
+        get_environment_secrets,
+        get_environment_variables,
+        read_variable_names,
+        setup_logging,
+        validate_environment,
+    )
 
 # Initialize logging for this script
 logger = setup_logging("check.log", "check")

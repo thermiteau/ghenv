@@ -50,14 +50,16 @@ def setup_logging(log_file, logger_name):
     """
     # Get log level from environment variable, default to INFO
     log_level = os.environ.get("LOG_LEVEL", "INFO")
-
+    os.makedirs(os.path.join(os.path.dirname(__file__), "logs"), exist_ok=True)
     # Configure logging with custom format including timestamps
     logging.basicConfig(
         level=log_level,
         format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
         handlers=[
-            logging.FileHandler(log_file),
+            logging.FileHandler(
+                os.path.join(os.path.dirname(__file__), "logs", log_file)
+            ),
             logging.StreamHandler(sys.stdout),
         ],
     )

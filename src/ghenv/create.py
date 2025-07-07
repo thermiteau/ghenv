@@ -29,16 +29,28 @@ Author: GitHub Environment Management Team
 import argparse
 import sys
 
-from ghenv.ghenv_lib import (
-    encrypt_secret,
-    fetch_public_key,
-    find_files_by_extension,
-    put_secret,
-    put_variable,
-    read_variable_names,
-    setup_logging,
-    validate_environment,
-)
+try:
+    from .ghenv_lib import (
+        encrypt_secret,
+        fetch_public_key,
+        find_files_by_extension,
+        put_secret,
+        put_variable,
+        read_variable_names,
+        setup_logging,
+        validate_environment,
+    )
+except ImportError:
+    from ghenv_lib import (
+        encrypt_secret,
+        fetch_public_key,
+        find_files_by_extension,
+        put_secret,
+        put_variable,
+        read_variable_names,
+        setup_logging,
+        validate_environment,
+    )
 
 # Initialize logging for this script
 logger = setup_logging("create.log", "create")

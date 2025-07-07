@@ -5,4 +5,4 @@ This package provides utilities for managing GitHub environment variables and se
 """
 
 __version__ = "1.0.0"
-__author__ = "GitHub Environment Management Team"
+__author__ = "Thermite"
