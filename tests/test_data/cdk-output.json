@@ -1,0 +1,15 @@
+{
+  "some-app": {
+    "apiServerLambdaName": "somestring",
+    "websocketServerLambdaName": "somestring",
+    "appBucketName": "somestring",
+    "wfgpScoreLambdaName": "somestring",
+    "appCloudFrontDistributionId": "somestring",
+    "wfgpFinaliseLambdaName": "somestring",
+    "wfgpStandardiseScoreLambdaName": "somestring",
+    "wfgpFeedbackLambdaName": "somestring",
+    "studentBucketName": "somestring",
+    "apiAuthoriserLambdaName": "somestring",
+    "websocketAuthoriserLambdaName": "somestring"
+  }
+}

@@ -8,11 +8,15 @@ and secrets across multiple deployment configurations.
 Functions:
     setup_logging: Configure logging with timestamps and dual output
     read_variable_names: Read and deduplicate variable/secret names from files
+    read_value_pairs: Read and parse name=value pairs from files (.txt or .json)
+    camel_to_upper_snake: Convert camelCase to UPPER_SNAKE_CASE
     find_files_by_extension: Find files by extension in directory
     fetch_public_key: Get public key for secret encryption
     encrypt_secret: Encrypt secrets using public key
     put_variable: Create variables in GitHub environment
     put_secret: Create secrets in GitHub environment
+    update_variable: Update existing variables in GitHub environment
+    update_secret: Update existing secrets in GitHub environment
     check_variable_exists: Check if variable exists
     check_secret_exists: Check if secret exists
     get_environment_variables: Get all variables with pagination
@@ -21,8 +25,10 @@ Functions:
 """
 
 import base64
+import json
 import logging
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -527,6 +533,207 @@ def get_environment_secrets(owner, repo, env_name, token, logger):
         page += 1
 
     return all_secrets
+
+
+def camel_to_upper_snake(camel_str):
+    """
+    Convert camelCase string to UPPER_SNAKE_CASE.
+
+    This function converts camelCase strings to uppercase snake_case format,
+    which is commonly used for environment variable names.
+
+    Args:
+        camel_str (str): String in camelCase format
+
+    Returns:
+        str: String converted to UPPER_SNAKE_CASE
+
+    Example:
+        >>> camel_to_upper_snake("apiServerLambdaName")
+        'API_SERVER_LAMBDA_NAME'
+        >>> camel_to_upper_snake("websocketServerLambdaName")
+        'WEBSOCKET_SERVER_LAMBDA_NAME'
+    """
+    # Insert an underscore before any uppercase letter that follows a lowercase letter
+    snake_str = re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str)
+    # Convert to uppercase
+    return snake_str.upper()
+
+
+def read_value_pairs(file_path):
+    """
+    Read and parse name=value pairs from file.
+
+    This function reads a file and extracts name=value pairs.
+    Supports two file formats:
+    - .txt files: key=value pairs (one per line, # for comments)
+    - .json files: AWS CDK output format (camelCase keys converted to UPPER_SNAKE_CASE)
+
+    Args:
+        file_path (str or Path): Path to file to read from
+
+    Returns:
+        dict: Dictionary of name:value pairs
+
+    Example:
+        >>> # .txt file
+        >>> pairs = read_value_pairs("app1.txt")
+        >>> print(pairs)
+        {'DB_HOST': 'localhost', 'DB_PASSWORD': 'secret123', 'API_KEY': 'key456'}
+
+        >>> # .json file (CDK output)
+        >>> pairs = read_value_pairs("cdk-output.json")
+        >>> print(pairs)
+        {'API_SERVER_LAMBDA_NAME': 'somestring', 'WEBSOCKET_SERVER_LAMBDA_NAME': 'somestring'}
+    """
+    file_path = Path(file_path)
+    value_pairs = {}
+
+    # Determine file type by extension
+    if file_path.suffix.lower() == '.json':
+        # Parse JSON file (AWS CDK output format)
+        with open(file_path) as f:
+            data = json.load(f)
+
+        # CDK output has a top-level key (e.g., "some-app") with nested object
+        # We need to extract the nested object and transform keys
+        for top_level_key, nested_obj in data.items():
+            if isinstance(nested_obj, dict):
+                # Transform camelCase keys to UPPER_SNAKE_CASE
+                for camel_key, value in nested_obj.items():
+                    snake_key = camel_to_upper_snake(camel_key)
+                    value_pairs[snake_key] = str(value)
+
+    elif file_path.suffix.lower() == '.txt':
+        # Parse text file (key=value format)
+        with open(file_path) as f:
+            for line in f:
+                # Remove comments (everything after #)
+                line = line.split("#")[0].strip()
+                # Skip empty lines
+                if not line:
+                    continue
+                # Parse name=value pairs
+                if "=" in line:
+                    name, value = line.split("=", 1)  # Split on first = only
+                    name = name.strip()
+                    value = value.strip()
+                    if name and value:
+                        value_pairs[name] = value
+    else:
+        raise ValueError(f"Unsupported file format: {file_path.suffix}. Only .txt and .json are supported.")
+
+    return value_pairs
+
+
+def update_variable(owner, repo, env_name, token, var_name, var_value, logger):
+    """
+    Update a variable in the GitHub environment.
+
+    Updates an existing environment variable in the specified GitHub environment.
+    Variables are stored in plain text (unlike secrets which are encrypted).
+
+    Args:
+        owner (str): GitHub repository owner (username or organization)
+        repo (str): GitHub repository name
+        env_name (str): GitHub environment name
+        token (str): GitHub API token
+        var_name (str): Name of the variable to update
+        var_value (str): New value for the variable
+        logger (logging.Logger): Logger instance for output
+
+    Raises:
+        SystemExit: If the API request fails
+
+    Example:
+        >>> update_variable("myorg", "myrepo", "prod", token, "DB_HOST", "db.example.com", logger)
+        >>> # Updates the DB_HOST variable in the prod environment
+    """
+    logger.info(f"Updating variable '{var_name}'...")
+
+    # Construct the API URL for updating variables
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/variables/{var_name}"
+
+    # Set up headers for the API request
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # Prepare the request payload
+    payload = {"name": var_name, "value": var_value}
+
+    # Make the API request (PATCH for updating existing variables)
+    response = requests.patch(url, headers=headers, json=payload)
+
+    # Check for successful response (204 = updated successfully)
+    if response.status_code == 204:
+        logger.info(f"Variable '{var_name}' updated successfully.")
+    else:
+        # Log error and exit on failure
+        logger.error(
+            f"Error updating variable '{var_name}' at {url}: {response.status_code} {response.text}"
+        )
+        sys.exit(1)
+
+
+def update_secret(
+    owner, repo, env_name, token, sec_name, encrypted_value, key_id, logger
+):
+    """
+    Update a secret in the GitHub environment.
+
+    Updates an existing environment secret in the specified GitHub environment.
+    Secrets must be encrypted with the environment's public key before
+    being sent to the GitHub API. This function uses PUT which creates or updates.
+
+    Args:
+        owner (str): GitHub repository owner (username or organization)
+        repo (str): GitHub repository name
+        env_name (str): GitHub environment name
+        token (str): GitHub API token
+        sec_name (str): Name of the secret to update
+        encrypted_value (str): Base64-encoded encrypted secret value
+        key_id (str): Key ID used for encryption
+        logger (logging.Logger): Logger instance for output
+
+    Raises:
+        SystemExit: If the API request fails
+
+    Example:
+        >>> update_secret("myorg", "myrepo", "prod", token, "DB_PASSWORD", encrypted_value, key_id, logger)
+        >>> # Updates the encrypted secret named DB_PASSWORD in the prod environment
+    """
+    logger.info(f"Updating secret '{sec_name}'...")
+
+    # Construct the API URL for updating secrets
+    url = (
+        f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
+    )
+
+    # Set up headers for the API request
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # Prepare the request payload with encrypted value and key ID
+    payload = {"encrypted_value": encrypted_value, "key_id": key_id}
+
+    # Make the API request (PUT for updating secrets)
+    response = requests.put(url, headers=headers, json=payload)
+
+    # Check for successful response (201 = created, 204 = updated)
+    if response.status_code in (201, 204):
+        logger.info(f"Secret '{sec_name}' updated successfully.")
+    else:
+        # Log error and exit on failure
+        logger.error(
+            f"Error updating secret '{sec_name}': {response.status_code} {response.text}"
+        )
+        sys.exit(1)
 
 
 def validate_environment(owner, repo, env_name, vars_dir, logger):

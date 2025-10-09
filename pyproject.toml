@@ -27,6 +27,7 @@ test = [
 [project.scripts]
 ghenv-check = "ghenv.check:main"
 ghenv-create = "ghenv.create:main"
+ghenv-update = "ghenv.update:main"
 
 [tool.uv]
 dev-dependencies = []
