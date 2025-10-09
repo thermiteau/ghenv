@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ghenv"
+version = "0.0.2"
+description = "GitHub environment variable and secret management tool for bidirectional synchronization"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [
+    { name = "Thermite" }
+]
+dependencies = [
+    "pynacl>=1.6.0",
+    "requests>=2.32.4",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.0.0",
+    "pytest-mock>=3.10.0",
+    "requests-mock>=1.10.0",
+    "pytest-cov>=4.0.0",
+]
+
+[project.scripts]
+ghenv-check = "ghenv.check:main"
+ghenv-create = "ghenv.create:main"
+
+[tool.uv]
+dev-dependencies = []
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ghenv"]

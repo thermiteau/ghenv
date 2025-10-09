@@ -249,13 +249,17 @@ def put_variable(owner, repo, env_name, token, var_name, logger):
     response = requests.post(url, headers=headers, json=payload)
 
     # Check for successful response (200 = updated, 201 = created)
-    if response.status_code not in (200, 201):
+    if response.status_code in (200, 201):
+        logger.info(f"Variable '{var_name}' created.")
+    elif response.status_code == 409:
+        # Variable already exists - this is okay, just log a warning and continue
+        logger.warning(f"Variable '{var_name}' already exists, skipping creation.")
+    else:
+        # Other errors should still cause the script to exit
         logger.error(
             f"Error creating variable '{var_name}' at {url}: {response.status_code} {response.text}"
         )
         sys.exit(1)
-
-    logger.info(f"Variable '{var_name}' created.")
 
 
 def put_secret(owner, repo, env_name, token, sec_name, encrypted_value, key_id, logger):
@@ -304,13 +308,17 @@ def put_secret(owner, repo, env_name, token, sec_name, encrypted_value, key_id, 
     response = requests.put(url, headers=headers, json=payload)
 
     # Check for successful response (200 = updated, 201 = created)
-    if response.status_code not in (200, 201):
+    if response.status_code in (200, 201):
+        logger.info(f"Secret '{sec_name}' created.")
+    elif response.status_code == 409:
+        # Secret already exists - this is okay, just log a warning and continue
+        logger.warning(f"Secret '{sec_name}' already exists, skipping creation.")
+    else:
+        # Other errors should still cause the script to exit
         logger.error(
             f"Error creating secret '{sec_name}': {response.status_code} {response.text}"
         )
         sys.exit(1)
-
-    logger.info(f"Secret '{sec_name}' created.")
 
 
 def check_variable_exists(owner, repo, env_name, token, var_name):

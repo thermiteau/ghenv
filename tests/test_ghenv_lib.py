@@ -320,6 +320,26 @@ class TestPutVariable:
         logger.info.assert_any_call("Creating variable 'TEST_VAR'...")
         logger.info.assert_any_call("Variable 'TEST_VAR' created.")
 
+    def test_put_variable_already_exists(self, requests_mock):
+        """Test variable creation when variable already exists (409)."""
+        requests_mock.post(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/variables",
+            status_code=409,
+            json={"message": "Already exists"},
+        )
+
+        logger = Mock()
+
+        # Should not raise SystemExit, should handle gracefully
+        ghenv_lib.put_variable(
+            "testowner", "testrepo", "testenv", "test_token", "TEST_VAR", logger
+        )
+
+        # Verify warning was logged
+        logger.warning.assert_called_once_with(
+            "Variable 'TEST_VAR' already exists, skipping creation."
+        )
+
     def test_put_variable_api_error(self, requests_mock):
         """Test variable creation with API error."""
         requests_mock.post(
@@ -372,6 +392,33 @@ class TestPutSecret:
         # Verify both log messages were called
         logger.info.assert_any_call("Creating secret 'TEST_SECRET'...")
         logger.info.assert_any_call("Secret 'TEST_SECRET' created.")
+
+    def test_put_secret_already_exists(self, requests_mock):
+        """Test secret creation when secret already exists (409)."""
+        requests_mock.put(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/secrets/TEST_SECRET",
+            status_code=409,
+            json={"message": "Already exists"},
+        )
+
+        logger = Mock()
+
+        # Should not raise SystemExit, should handle gracefully
+        ghenv_lib.put_secret(
+            "testowner",
+            "testrepo",
+            "testenv",
+            "test_token",
+            "TEST_SECRET",
+            "encrypted_value",
+            "key_id",
+            logger,
+        )
+
+        # Verify warning was logged
+        logger.warning.assert_called_once_with(
+            "Secret 'TEST_SECRET' already exists, skipping creation."
+        )
 
     def test_put_secret_api_error(self, requests_mock):
         """Test secret creation with API error."""

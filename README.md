@@ -7,12 +7,21 @@ This directory contains Python scripts for managing GitHub environment variables
 ```
 ghenv/
 ├── README.md              # This documentation
-├── check.py               # Check environment for secrets/variables
-├── create.py              # Create missing secrets/variables
-├── ghenv_lib.py           # Shared utilities library
-├── data/                  # Optional folder to hold data files
-   ├── *.yml.vars          # GitHub Actions variable files
-   └── *.yml.secs          # GitHub Actions secret files
+├── CLAUDE.md              # Development guide for Claude Code
+├── pyproject.toml         # Project configuration and dependencies
+├── uv.lock                # Locked dependencies
+├── .python-version        # Python version specification
+├── src/ghenv/             # Main package source
+│   ├── __init__.py        # Package initialization
+│   ├── check.py           # Check environment for secrets/variables
+│   ├── create.py          # Create missing secrets/variables
+│   ├── ghenv_lib.py       # Shared utilities library
+│   └── logs/              # Log files directory
+├── tests/                 # Test suite
+│   └── test_ghenv_lib.py  # Comprehensive unit tests
+└── data/                  # Optional folder to hold data files
+    ├── *.yml.vars         # GitHub Actions variable files
+    └── *.yml.secs         # GitHub Actions secret files
 ```
 
 ## Variables and Secrets Files
@@ -94,7 +103,11 @@ A Python script that checks that GitHub Environments have all the secrets and va
 export GH_API_SECRET="your_github_token"
 
 # Check all .vars and .secs files in a directory against a GitHub environment
-python check.py <owner> <repo> <env-name> <data-directory>
+uv run ghenv-check <owner> <repo> <env-name> <data-directory>
+
+# Alternative methods:
+uv run python -m ghenv.check <owner> <repo> <env-name> <data-directory>
+uv run python src/ghenv/check.py <owner> <repo> <env-name> <data-directory>
 ```
 
 #### Parameters
@@ -108,21 +121,25 @@ python check.py <owner> <repo> <env-name> <data-directory>
 
 ```bash
 # Check all .vars and .secs files in the data directory against GitHub environment
-python check.py myorg myrepo myEnvName data
+uv run ghenv-check myorg myrepo myEnvName data
 ```
 
 #### Makefile example
 
 ```makefile
 envcheck:
-	@python ghenv/check.py ${OWNER} ${REPO} ${GH_ENV_NAME} ghenv/data
+	@uv run ghenv-check ${OWNER} ${REPO} ${GH_ENV_NAME} ghenv/data
+
+# Alternative using module syntax
+envcheck-alt:
+	@uv run python -m ghenv.check ${OWNER} ${REPO} ${GH_ENV_NAME} ghenv/data
 ```
 
 #### Prerequisites
 
-- **Python 3.6+**: Required for running the scripts
+- **Python 3.10+**: Required for running the scripts
+- **uv**: Package manager for Python (install from https://docs.astral.sh/uv/)
 - **GitHub Token**: Must have `actions:write` permission
-- **Python Dependencies**: Install via `pip install -r requirements.txt`
 
 #### Output
 
@@ -173,7 +190,11 @@ Create missing secrets and variables in GitHub environments with default placeho
 export GH_API_SECRET="your_github_token"
 
 # Create missing variables and secrets in a GitHub environment
-python create.py <owner> <repo> <env-name> <data-directory>
+uv run ghenv-create <owner> <repo> <env-name> <data-directory>
+
+# Alternative methods:
+uv run python -m ghenv.create <owner> <repo> <env-name> <data-directory>
+uv run python src/ghenv/create.py <owner> <repo> <env-name> <data-directory>
 ```
 
 #### Parameters
@@ -187,21 +208,25 @@ python create.py <owner> <repo> <env-name> <data-directory>
 
 ```bash
 # Create missing variables and secrets in the data directory for GitHub environment
-python create.py myorg myrepo myEnvName data
+uv run ghenv-create myorg myrepo myEnvName data
 ```
 
 #### Makefile example
 
 ```makefile
 envcreate:
-	@python ghenv/create.py ${OWNER} ${REPO} ${GH_ENV_NAME} ghenv/data
+	@uv run ghenv-create ${OWNER} ${REPO} ${GH_ENV_NAME} ghenv/data
+
+# Alternative using module syntax
+envcreate-alt:
+	@uv run python -m ghenv.create ${OWNER} ${REPO} ${GH_ENV_NAME} ghenv/data
 ```
 
 #### Prerequisites
 
-- **Python 3.6+**: Required for running the scripts
+- **Python 3.10+**: Required for running the scripts
+- **uv**: Package manager for Python (install from https://docs.astral.sh/uv/)
 - **GitHub Token**: Must have `actions:write` permission
-- **Python Dependencies**: Install via `pip install -r requirements.txt`
 
 #### Output
 
@@ -235,8 +260,9 @@ The script logs to both console and `create.log` file with timestamps:
 
 ### Prerequisites
 
-1. **Python 3.6 or higher**
-2. **GitHub Token with `actions:write` permission**
+1. **Python 3.10 or higher**
+2. **uv package manager** - Install from https://docs.astral.sh/uv/
+3. **GitHub Token with `actions:write` permission**
 
 ### Setup
 
@@ -247,16 +273,31 @@ The script logs to both console and `create.log` file with timestamps:
    cd ghenv
    ```
 
-2. **Install Python dependencies**:
+2. **Install dependencies and the package**:
 
    ```bash
-   pip install -r requirements.txt
+   # Sync all dependencies (including test dependencies)
+   uv sync --all-extras
+
+   # Or sync only production dependencies
+   uv sync
    ```
 
 3. **Set your GitHub token**:
    ```bash
    export GH_API_SECRET="your_github_token"
    ```
+
+### Verifying Installation
+
+```bash
+# Verify the CLI commands are available
+uv run ghenv-check --help
+uv run ghenv-create --help
+
+# Run tests to ensure everything is working
+uv run pytest
+```
 
 ## Troubleshooting
 
@@ -282,8 +323,9 @@ The script logs to both console and `create.log` file with timestamps:
 
 4. **Python Import Errors**
 
-   - Ensure all dependencies are installed: `pip install -r requirements.txt`
-   - Check Python version: `python --version` (should be 3.6+)
+   - Ensure all dependencies are installed: `uv sync --all-extras`
+   - Check Python version: `python --version` (should be 3.10+)
+   - Verify uv is installed: `uv --version`
 
 5. **Logging Issues**
    - Check file permissions for log files
@@ -298,15 +340,48 @@ The script logs to both console and `create.log` file with timestamps:
 
 ### Project Structure
 
-- `check.py`: Main script for checking environment synchronization
-- `create.py`: Main script for creating missing variables and secrets
-- `ghenv_lib.py`: Shared utilities and GitHub API functions
-- `requirements.txt`: Python dependencies
+- `src/ghenv/check.py`: Main script for checking environment synchronization
+- `src/ghenv/create.py`: Main script for creating missing variables and secrets
+- `src/ghenv/ghenv_lib.py`: Shared utilities and GitHub API functions
+- `tests/test_ghenv_lib.py`: Comprehensive unit tests
+- `pyproject.toml`: Project configuration and dependencies
+- `uv.lock`: Locked dependencies for reproducible builds
 - `data/`: Directory containing `.vars` and `.secs` files
+
+### Development Commands
+
+```bash
+# Install all dependencies including test dependencies
+uv sync --all-extras
+
+# Run all tests
+uv run pytest
+
+# Run tests with verbose output
+uv run pytest -v
+
+# Run tests with coverage
+uv run pytest --cov=ghenv --cov-report=html
+
+# Build the package
+uv build
+
+# Add a new dependency
+uv add <package-name>
+
+# Add a test dependency
+uv add --optional test <package-name>
+```
 
 ### Adding New Features
 
-1. **Shared Functions**: Add common functionality to `ghenv_lib.py`
-2. **Scripts**: Create new scripts that import from `ghenv_lib.py`
-3. **Logging**: Use the `setup_logging()` function for consistent logging
-4. **Error Handling**: Follow the established pattern of logging errors and exiting with appropriate codes
+1. **Shared Functions**: Add common functionality to `src/ghenv/ghenv_lib.py`
+2. **Scripts**: Create new scripts in `src/ghenv/` that import from `ghenv_lib.py`
+3. **Tests**: Add tests to `tests/test_ghenv_lib.py` following the existing patterns
+4. **Logging**: Use the `setup_logging()` function for consistent logging
+5. **Error Handling**: Follow the established pattern of logging errors and exiting with appropriate codes
+6. **CLI Commands**: Add new entry points in `pyproject.toml` under `[project.scripts]`
+
+### Running Tests
+
+See the [CLAUDE.md](CLAUDE.md) file for comprehensive testing instructions and development commands.
