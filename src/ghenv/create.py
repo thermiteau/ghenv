@@ -34,6 +34,8 @@ try:
         encrypt_secret,
         fetch_public_key,
         find_files_by_extension,
+        get_environment_secrets,
+        get_environment_variables,
         put_secret,
         put_variable,
         read_variable_names,
@@ -45,6 +47,8 @@ except ImportError:
         encrypt_secret,
         fetch_public_key,
         find_files_by_extension,
+        get_environment_secrets,
+        get_environment_variables,
         put_secret,
         put_variable,
         read_variable_names,
@@ -125,9 +129,26 @@ def main():
         # Read and deduplicate variable names from all .vars files
         var_names = read_variable_names(var_files)
 
-        # Create each variable in the GitHub environment
-        for var in var_names:
-            logger.info(f"Creating variable {var}...")
+        # Get existing variables from GitHub to avoid unnecessary creation attempts
+        github_vars = get_environment_variables(
+            args.owner, args.repo, args.env_name, gh_token, logger
+        )
+        github_vars_set = set(github_vars)
+
+        # Filter to only create variables that don't already exist
+        vars_to_create = [var for var in var_names if var not in github_vars_set]
+
+        # Log summary
+        already_exist_count = len(var_names) - len(vars_to_create)
+        if already_exist_count > 0:
+            logger.info(
+                f"{already_exist_count} variable(s) already exist in GitHub, skipping"
+            )
+        if vars_to_create:
+            logger.info(f"Creating {len(vars_to_create)} new variable(s)")
+
+        # Create each missing variable in the GitHub environment
+        for var in vars_to_create:
             put_variable(args.owner, args.repo, args.env_name, gh_token, var, logger)
 
     # Process secrets (.secs files)
@@ -135,8 +156,26 @@ def main():
         # Read and deduplicate secret names from all .secs files
         sec_names = read_variable_names(sec_files)
 
-        # Create each secret in the GitHub environment
-        for sec in sec_names:
+        # Get existing secrets from GitHub to avoid unnecessary creation attempts
+        github_secs = get_environment_secrets(
+            args.owner, args.repo, args.env_name, gh_token, logger
+        )
+        github_secs_set = set(github_secs)
+
+        # Filter to only create secrets that don't already exist
+        secs_to_create = [sec for sec in sec_names if sec not in github_secs_set]
+
+        # Log summary
+        already_exist_count = len(sec_names) - len(secs_to_create)
+        if already_exist_count > 0:
+            logger.info(
+                f"{already_exist_count} secret(s) already exist in GitHub, skipping"
+            )
+        if secs_to_create:
+            logger.info(f"Creating {len(secs_to_create)} new secret(s)")
+
+        # Create each missing secret in the GitHub environment
+        for sec in secs_to_create:
             # Encrypt the placeholder value using GitHub's public key
             encrypted_value = encrypt_secret(public_key, "NONE")  # Placeholder value
 

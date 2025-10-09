@@ -35,8 +35,6 @@ import sys
 
 try:
     from .ghenv_lib import (
-        check_secret_exists,
-        check_variable_exists,
         find_files_by_extension,
         get_environment_secrets,
         get_environment_variables,
@@ -46,8 +44,6 @@ try:
     )
 except ImportError:
     from ghenv_lib import (
-        check_secret_exists,
-        check_variable_exists,
         find_files_by_extension,
         get_environment_secrets,
         get_environment_variables,
@@ -126,26 +122,21 @@ def main():
         # Read and deduplicate variable names from all .vars files
         var_names = read_variable_names(var_files)
 
-        # Track missing and existing variables
-        missing_vars = []
-        existing_vars = []
-
-        # Check each variable against the GitHub environment
-        for var_name in var_names:
-            if check_variable_exists(
-                args.owner, args.repo, args.env_name, gh_token, var_name
-            ):
-                existing_vars.append(var_name)
-            else:
-                missing_vars.append(var_name)
-
-        # Get all variables from GitHub environment (with pagination support)
+        # Get all variables from GitHub environment ONCE (with pagination support)
+        # This is much more efficient than checking each variable individually
         github_vars = get_environment_variables(
             args.owner, args.repo, args.env_name, gh_token, logger
         )
 
-        # Find variables that exist in GitHub but not in local files
-        extra_vars = [var for var in github_vars if var not in var_names]
+        # Use set operations for efficient comparison
+        var_names_set = set(var_names)
+        github_vars_set = set(github_vars)
+
+        # Find missing variables (in local files but not in GitHub)
+        missing_vars = sorted(var_names_set - github_vars_set)
+
+        # Find extra variables (in GitHub but not in local files)
+        extra_vars = sorted(github_vars_set - var_names_set)
 
         # Report any issues found with variables
         if missing_vars or extra_vars:
@@ -170,26 +161,21 @@ def main():
         # Read and deduplicate secret names from all .secs files
         sec_names = read_variable_names(sec_files)
 
-        # Track missing and existing secrets
-        missing_secs = []
-        existing_secs = []
-
-        # Check each secret against the GitHub environment
-        for sec_name in sec_names:
-            if check_secret_exists(
-                args.owner, args.repo, args.env_name, gh_token, sec_name
-            ):
-                existing_secs.append(sec_name)
-            else:
-                missing_secs.append(sec_name)
-
-        # Get all secrets from GitHub environment (with pagination support)
+        # Get all secrets from GitHub environment ONCE (with pagination support)
+        # This is much more efficient than checking each secret individually
         github_secs = get_environment_secrets(
             args.owner, args.repo, args.env_name, gh_token, logger
         )
 
-        # Find secrets that exist in GitHub but not in local files
-        extra_secs = [sec for sec in github_secs if sec not in sec_names]
+        # Use set operations for efficient comparison
+        sec_names_set = set(sec_names)
+        github_secs_set = set(github_secs)
+
+        # Find missing secrets (in local files but not in GitHub)
+        missing_secs = sorted(sec_names_set - github_secs_set)
+
+        # Find extra secrets (in GitHub but not in local files)
+        extra_secs = sorted(github_secs_set - sec_names_set)
 
         # Report any issues found with secrets
         if missing_secs or extra_secs:
