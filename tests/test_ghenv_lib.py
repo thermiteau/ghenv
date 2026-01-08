@@ -13,6 +13,8 @@ Test Coverage:
     - encrypt_secret: Secret encryption
     - put_variable: Variable creation
     - put_secret: Secret creation
+    - delete_variable: Variable deletion
+    - delete_secret: Secret deletion
     - check_variable_exists: Variable existence checking
     - check_secret_exists: Secret existence checking
     - get_environment_variables: Variable retrieval with pagination
@@ -440,6 +442,130 @@ class TestPutSecret:
                 "encrypted_value",
                 "key_id",
                 logger,
+            )
+
+        logger.error.assert_called_once()
+
+
+class TestDeleteVariable:
+    """Test cases for delete_variable function."""
+
+    def test_delete_variable_success(self, requests_mock):
+        """Test successful variable deletion."""
+        requests_mock.delete(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/variables/TEST_VAR",
+            status_code=204,
+        )
+
+        logger = Mock()
+        ghenv_lib.delete_variable(
+            "testowner", "testrepo", "testenv", "test_token", "TEST_VAR", logger
+        )
+
+        # Verify the request was made correctly
+        assert len(requests_mock.request_history) == 1
+        request = requests_mock.request_history[0]
+        assert request.method == "DELETE"
+
+        # Verify both log messages were called
+        logger.info.assert_any_call("Deleting variable 'TEST_VAR'...")
+        logger.info.assert_any_call("Variable 'TEST_VAR' deleted successfully.")
+
+    def test_delete_variable_not_found(self, requests_mock):
+        """Test variable deletion when variable doesn't exist (404)."""
+        requests_mock.delete(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/variables/TEST_VAR",
+            status_code=404,
+            json={"message": "Not found"},
+        )
+
+        logger = Mock()
+
+        # Should not raise SystemExit, should handle gracefully
+        ghenv_lib.delete_variable(
+            "testowner", "testrepo", "testenv", "test_token", "TEST_VAR", logger
+        )
+
+        # Verify warning was logged
+        logger.warning.assert_called_once_with(
+            "Variable 'TEST_VAR' not found, skipping deletion."
+        )
+
+    def test_delete_variable_api_error(self, requests_mock):
+        """Test variable deletion with API error."""
+        requests_mock.delete(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/variables/TEST_VAR",
+            status_code=500,
+            text="Internal server error",
+        )
+
+        logger = Mock()
+
+        with pytest.raises(SystemExit):
+            ghenv_lib.delete_variable(
+                "testowner", "testrepo", "testenv", "test_token", "TEST_VAR", logger
+            )
+
+        logger.error.assert_called_once()
+
+
+class TestDeleteSecret:
+    """Test cases for delete_secret function."""
+
+    def test_delete_secret_success(self, requests_mock):
+        """Test successful secret deletion."""
+        requests_mock.delete(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/secrets/TEST_SECRET",
+            status_code=204,
+        )
+
+        logger = Mock()
+        ghenv_lib.delete_secret(
+            "testowner", "testrepo", "testenv", "test_token", "TEST_SECRET", logger
+        )
+
+        # Verify the request was made correctly
+        assert len(requests_mock.request_history) == 1
+        request = requests_mock.request_history[0]
+        assert request.method == "DELETE"
+
+        # Verify both log messages were called
+        logger.info.assert_any_call("Deleting secret 'TEST_SECRET'...")
+        logger.info.assert_any_call("Secret 'TEST_SECRET' deleted successfully.")
+
+    def test_delete_secret_not_found(self, requests_mock):
+        """Test secret deletion when secret doesn't exist (404)."""
+        requests_mock.delete(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/secrets/TEST_SECRET",
+            status_code=404,
+            json={"message": "Not found"},
+        )
+
+        logger = Mock()
+
+        # Should not raise SystemExit, should handle gracefully
+        ghenv_lib.delete_secret(
+            "testowner", "testrepo", "testenv", "test_token", "TEST_SECRET", logger
+        )
+
+        # Verify warning was logged
+        logger.warning.assert_called_once_with(
+            "Secret 'TEST_SECRET' not found, skipping deletion."
+        )
+
+    def test_delete_secret_api_error(self, requests_mock):
+        """Test secret deletion with API error."""
+        requests_mock.delete(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/secrets/TEST_SECRET",
+            status_code=500,
+            text="Internal server error",
+        )
+
+        logger = Mock()
+
+        with pytest.raises(SystemExit):
+            ghenv_lib.delete_secret(
+                "testowner", "testrepo", "testenv", "test_token", "TEST_SECRET", logger
             )
 
         logger.error.assert_called_once()

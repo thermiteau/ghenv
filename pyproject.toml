@@ -28,6 +28,7 @@ test = [
 ghenv-check = "ghenv.check:main"
 ghenv-create = "ghenv.create:main"
 ghenv-update = "ghenv.update:main"
+ghenv-delete = "ghenv.delete:main"
 
 [tool.uv]
 dev-dependencies = []

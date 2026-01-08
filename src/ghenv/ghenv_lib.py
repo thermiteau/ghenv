@@ -17,6 +17,8 @@ Functions:
     put_secret: Create secrets in GitHub environment
     update_variable: Update existing variables in GitHub environment
     update_secret: Update existing secrets in GitHub environment
+    delete_variable: Delete variables from GitHub environment
+    delete_secret: Delete secrets from GitHub environment
     check_variable_exists: Check if variable exists
     check_secret_exists: Check if secret exists
     get_environment_variables: Get all variables with pagination
@@ -732,6 +734,108 @@ def update_secret(
         # Log error and exit on failure
         logger.error(
             f"Error updating secret '{sec_name}': {response.status_code} {response.text}"
+        )
+        sys.exit(1)
+
+
+def delete_variable(owner, repo, env_name, token, var_name, logger):
+    """
+    Delete a variable from the GitHub environment.
+
+    Deletes an existing environment variable from the specified GitHub environment.
+
+    Args:
+        owner (str): GitHub repository owner (username or organization)
+        repo (str): GitHub repository name
+        env_name (str): GitHub environment name
+        token (str): GitHub API token
+        var_name (str): Name of the variable to delete
+        logger (logging.Logger): Logger instance for output
+
+    Raises:
+        SystemExit: If the API request fails
+
+    Example:
+        >>> delete_variable("myorg", "myrepo", "prod", token, "DB_HOST", logger)
+        >>> # Deletes the variable named DB_HOST from the prod environment
+    """
+    logger.info(f"Deleting variable '{var_name}'...")
+
+    # Construct the API URL for deleting the variable
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/variables/{var_name}"
+
+    # Set up headers for the API request
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # Make the API request (DELETE for removing variables)
+    response = requests.delete(url, headers=headers)
+
+    # Check for successful response (204 = deleted successfully)
+    if response.status_code == 204:
+        logger.info(f"Variable '{var_name}' deleted successfully.")
+    elif response.status_code == 404:
+        # Variable doesn't exist - log a warning but don't fail
+        logger.warning(f"Variable '{var_name}' not found, skipping deletion.")
+    else:
+        # Log error and exit on failure
+        logger.error(
+            f"Error deleting variable '{var_name}' at {url}: {response.status_code} {response.text}"
+        )
+        sys.exit(1)
+
+
+def delete_secret(owner, repo, env_name, token, sec_name, logger):
+    """
+    Delete a secret from the GitHub environment.
+
+    Deletes an existing environment secret from the specified GitHub environment.
+
+    Args:
+        owner (str): GitHub repository owner (username or organization)
+        repo (str): GitHub repository name
+        env_name (str): GitHub environment name
+        token (str): GitHub API token
+        sec_name (str): Name of the secret to delete
+        logger (logging.Logger): Logger instance for output
+
+    Raises:
+        SystemExit: If the API request fails
+
+    Example:
+        >>> delete_secret("myorg", "myrepo", "prod", token, "DB_PASSWORD", logger)
+        >>> # Deletes the secret named DB_PASSWORD from the prod environment
+    """
+    logger.info(f"Deleting secret '{sec_name}'...")
+
+    # Construct the API URL for deleting the secret
+    url = (
+        f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
+    )
+
+    # Set up headers for the API request
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    # Make the API request (DELETE for removing secrets)
+    response = requests.delete(url, headers=headers)
+
+    # Check for successful response (204 = deleted successfully)
+    if response.status_code == 204:
+        logger.info(f"Secret '{sec_name}' deleted successfully.")
+    elif response.status_code == 404:
+        # Secret doesn't exist - log a warning but don't fail
+        logger.warning(f"Secret '{sec_name}' not found, skipping deletion.")
+    else:
+        # Log error and exit on failure
+        logger.error(
+            f"Error deleting secret '{sec_name}': {response.status_code} {response.text}"
         )
         sys.exit(1)
 
