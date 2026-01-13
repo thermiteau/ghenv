@@ -57,7 +57,7 @@ def setup_logging(log_file, logger_name):
         >>> logger.info("Application started")
     """
     # Get log level from environment variable, default to INFO
-    log_level = os.environ.get("LOG_LEVEL", "INFO")
+    log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
     os.makedirs(os.path.join(os.path.dirname(__file__), "logs"), exist_ok=True)
     # Configure logging with custom format including timestamps
     logging.basicConfig(
