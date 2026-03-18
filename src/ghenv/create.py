@@ -56,9 +56,6 @@ except ImportError:
         validate_environment,
     )
 
-# Initialize logging for this script
-logger = setup_logging("create.log", "create")
-
 
 def main():
     """
@@ -68,8 +65,8 @@ def main():
     1. Parses command line arguments
     2. Validates the environment and token
     3. Finds .vars and .secs files in the specified directory
-    4. Fetches the GitHub environment's public key for secret encryption
-    5. Creates missing variables and secrets with placeholder values
+    4. Creates missing variables and secrets with placeholder values
+    5. Fetches the GitHub environment's public key for secret encryption (only if needed)
     6. Logs the results
 
     Command line arguments:
@@ -86,17 +83,16 @@ def main():
         0: Success - all variables and secrets created
         1: Error - validation failed or API errors occurred
     """
+    # Initialize logging for this script
+    logger = setup_logging("create.log", "create")
+
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(
         description="Create missing GitHub environment variables and secrets from local files."
     )
-    parser.add_argument(
-        "owner", help="GitHub repository owner (username or organization)"
-    )
+    parser.add_argument("owner", help="GitHub repository owner (username or organization)")
     parser.add_argument("repo", help="GitHub repository name")
-    parser.add_argument(
-        "env_name", help="GitHub environment name (e.g., production, staging)"
-    )
+    parser.add_argument("env_name", help="GitHub environment name (e.g., production, staging)")
     parser.add_argument("vars_dir", help="Directory containing .vars and .secs files")
 
     # Parse the command line arguments
@@ -104,20 +100,12 @@ def main():
 
     # Validate environment and get GitHub token
     # This checks for GH_API_SECRET and validates the variables directory
-    gh_token, vars_dir = validate_environment(
-        args.owner, args.repo, args.env_name, args.vars_dir, logger
-    )
+    gh_token, vars_dir = validate_environment(args.vars_dir, logger)
 
     # Find all .vars and .secs files in the specified directory
     # This searches recursively for files with these extensions
     var_files = find_files_by_extension(vars_dir, "vars")
     sec_files = find_files_by_extension(vars_dir, "secs")
-
-    # Fetch the public key needed for encrypting secrets
-    # This is required by GitHub's API for storing secrets securely
-    key_id, public_key = fetch_public_key(
-        args.owner, args.repo, args.env_name, gh_token, logger
-    )
 
     # Check if any files were found
     if not var_files and not sec_files:
@@ -141,9 +129,7 @@ def main():
         # Log summary
         already_exist_count = len(var_names) - len(vars_to_create)
         if already_exist_count > 0:
-            logger.info(
-                f"{already_exist_count} variable(s) already exist in GitHub, skipping"
-            )
+            logger.info(f"{already_exist_count} variable(s) already exist in GitHub, skipping")
         if vars_to_create:
             logger.info(f"Creating {len(vars_to_create)} new variable(s)")
 
@@ -153,6 +139,13 @@ def main():
 
     # Process secrets (.secs files)
     if sec_files:
+        # Fetch the public key needed for encrypting secrets
+        # This is required by GitHub's API for storing secrets securely
+        # Only fetched when there are actually .secs files to process
+        key_id, public_key = fetch_public_key(
+            args.owner, args.repo, args.env_name, gh_token, logger
+        )
+
         # Read and deduplicate secret names from all .secs files
         sec_names = read_variable_names(sec_files)
 
@@ -168,9 +161,7 @@ def main():
         # Log summary
         already_exist_count = len(sec_names) - len(secs_to_create)
         if already_exist_count > 0:
-            logger.info(
-                f"{already_exist_count} secret(s) already exist in GitHub, skipping"
-            )
+            logger.info(f"{already_exist_count} secret(s) already exist in GitHub, skipping")
         if secs_to_create:
             logger.info(f"Creating {len(secs_to_create)} new secret(s)")
 

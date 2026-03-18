@@ -30,6 +30,16 @@ uv run pytest tests/test_ghenv_lib.py::TestReadVariableNames::test_read_variable
 uv run pytest --cov=ghenv --cov-report=html
 ```
 
+### Type Checking
+
+```bash
+# Run pyright type checker
+uv run pyright
+
+# Check specific file
+uv run pyright src/ghenv/ghenv_lib.py
+```
+
 ### Running the Scripts
 
 ```bash

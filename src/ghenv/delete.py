@@ -57,9 +57,6 @@ except ImportError:
         validate_environment,
     )
 
-# Initialize logging for this script
-logger = setup_logging("delete.log", "delete")
-
 
 def main():
     """
@@ -88,17 +85,16 @@ def main():
         0: Success - all orphaned items deleted (or none found)
         1: Error - validation failed or API errors occurred
     """
+    # Initialize logging for this script
+    logger = setup_logging("delete.log", "delete")
+
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(
         description="Delete orphaned GitHub environment variables and secrets not in local files."
     )
-    parser.add_argument(
-        "owner", help="GitHub repository owner (username or organization)"
-    )
+    parser.add_argument("owner", help="GitHub repository owner (username or organization)")
     parser.add_argument("repo", help="GitHub repository name")
-    parser.add_argument(
-        "env_name", help="GitHub environment name (e.g., production, staging)"
-    )
+    parser.add_argument("env_name", help="GitHub environment name (e.g., production, staging)")
     parser.add_argument("vars_dir", help="Directory containing .vars and .secs files")
     parser.add_argument(
         "--dry-run",
@@ -111,9 +107,7 @@ def main():
 
     # Validate environment and get GitHub token
     # This checks for GH_API_SECRET and validates the variables directory
-    gh_token, vars_dir = validate_environment(
-        args.owner, args.repo, args.env_name, args.vars_dir, logger
-    )
+    gh_token, vars_dir = validate_environment(args.vars_dir, logger)
 
     # Find all .vars and .secs files in the specified directory
     # This searches recursively for files with these extensions
@@ -145,17 +139,13 @@ def main():
 
         if orphaned_vars:
             if args.dry_run:
-                logger.info(
-                    f"[DRY-RUN] Would delete {len(orphaned_vars)} orphaned variable(s):"
-                )
+                logger.info(f"[DRY-RUN] Would delete {len(orphaned_vars)} orphaned variable(s):")
                 for var in orphaned_vars:
                     logger.info(f"[DRY-RUN]   - {var}")
             else:
                 logger.info(f"Deleting {len(orphaned_vars)} orphaned variable(s)")
                 for var in orphaned_vars:
-                    delete_variable(
-                        args.owner, args.repo, args.env_name, gh_token, var, logger
-                    )
+                    delete_variable(args.owner, args.repo, args.env_name, gh_token, var, logger)
                     total_deleted += 1
         else:
             logger.info("No orphaned variables found")
@@ -187,17 +177,13 @@ def main():
 
         if orphaned_secs:
             if args.dry_run:
-                logger.info(
-                    f"[DRY-RUN] Would delete {len(orphaned_secs)} orphaned secret(s):"
-                )
+                logger.info(f"[DRY-RUN] Would delete {len(orphaned_secs)} orphaned secret(s):")
                 for sec in orphaned_secs:
                     logger.info(f"[DRY-RUN]   - {sec}")
             else:
                 logger.info(f"Deleting {len(orphaned_secs)} orphaned secret(s)")
                 for sec in orphaned_secs:
-                    delete_secret(
-                        args.owner, args.repo, args.env_name, gh_token, sec, logger
-                    )
+                    delete_secret(args.owner, args.repo, args.env_name, gh_token, sec, logger)
                     total_deleted += 1
         else:
             logger.info("No orphaned secrets found")

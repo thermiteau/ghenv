@@ -32,6 +32,8 @@ import logging
 import os
 import re
 import sys
+from collections.abc import Sequence
+from logging import Logger
 from pathlib import Path
 
 import requests
@@ -40,13 +42,32 @@ from nacl import public
 # GitHub API base URL
 GITHUB_API = "https://api.github.com"
 
+# Timeout in seconds for all HTTP requests to the GitHub API
+_REQUEST_TIMEOUT = 30
 
-def setup_logging(log_file, logger_name):
+# Maximum number of pages to fetch during pagination (safety limit)
+_MAX_PAGES = 100
+
+
+def _build_headers(token: str) -> dict[str, str]:
+    """Build standard GitHub API request headers."""
+    return {
+        "Accept": "application/vnd.github+json",
+        "Authorization": f"Bearer {token}",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
+def setup_logging(log_filename: str, logger_name: str) -> Logger:
     """
     Setup logging with timestamp format and both file and console handlers.
 
+    Configures a named logger with file and console output. Unlike
+    logging.basicConfig, this can be called multiple times for different
+    loggers without interference.
+
     Args:
-        log_file (str): Path to the log file
+        log_filename (str): Name of the log file (or absolute path)
         logger_name (str): Name for the logger instance
 
     Returns:
@@ -58,23 +79,33 @@ def setup_logging(log_file, logger_name):
     """
     # Get log level from environment variable, default to INFO
     log_level = os.environ.get("LOG_LEVEL", "INFO").upper()
-    os.makedirs(os.path.join(os.path.dirname(__file__), "logs"), exist_ok=True)
-    # Configure logging with custom format including timestamps
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        handlers=[
-            logging.FileHandler(
-                os.path.join(os.path.dirname(__file__), "logs", log_file)
-            ),
-            logging.StreamHandler(sys.stdout),
-        ],
-    )
-    return logging.getLogger(logger_name)
+
+    log_dir = os.path.join(os.path.dirname(__file__), "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(log_level)
+
+    # Avoid adding duplicate handlers if called multiple times with the same name
+    if not logger.handlers:
+        formatter = logging.Formatter(
+            "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
+
+        file_handler = logging.FileHandler(os.path.join(log_dir, log_filename))
+        file_handler.setFormatter(formatter)
+
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(formatter)
+
+        logger.addHandler(file_handler)
+        logger.addHandler(stream_handler)
+
+    return logger
 
 
-def read_variable_names(file_paths):
+def read_variable_names(file_paths: Sequence[Path | str]) -> list[str]:
     """
     Read and deduplicate variable/secret names from files.
 
@@ -110,7 +141,7 @@ def read_variable_names(file_paths):
     return sorted(var_names)
 
 
-def find_files_by_extension(directory, extension):
+def find_files_by_extension(directory: Path | str, extension: str) -> list[Path]:
     """
     Find all files with given extension in directory.
 
@@ -132,7 +163,9 @@ def find_files_by_extension(directory, extension):
     return list(Path(directory).rglob(f"*.{extension}"))
 
 
-def fetch_public_key(owner, repo, env_name, token, logger):
+def fetch_public_key(
+    owner: str, repo: str, env_name: str, token: str, logger: Logger
+) -> tuple[str, str]:
     """
     Fetch the public key for encrypting secrets.
 
@@ -159,24 +192,16 @@ def fetch_public_key(owner, repo, env_name, token, logger):
     logger.info("Fetching environment public key...")
 
     # Construct the API URL for the public key endpoint
-    url = (
-        f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/public-key"
-    )
-
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/public-key"
 
     # Make the API request
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=_build_headers(token), timeout=_REQUEST_TIMEOUT)
 
     # Check for successful response
     if response.status_code != 200:
         logger.error(
-            f"Failed to fetch public key. Status: {response.status_code}, Response: {response.text}"
+            f"Failed to fetch public key. Status: {response.status_code}, "
+            f"Response: {response.text}"
         )
         sys.exit(1)
 
@@ -185,7 +210,7 @@ def fetch_public_key(owner, repo, env_name, token, logger):
     return data["key_id"], data["key"]
 
 
-def encrypt_secret(public_key_base64, secret_value):
+def encrypt_secret(public_key_base64: str, secret_value: str) -> str:
     """
     Encrypt a secret value using the public key.
 
@@ -216,7 +241,14 @@ def encrypt_secret(public_key_base64, secret_value):
     return base64.b64encode(encrypted).decode()
 
 
-def put_variable(owner, repo, env_name, token, var_name, logger):
+def put_variable(
+    owner: str,
+    repo: str,
+    env_name: str,
+    token: str,
+    var_name: str,
+    logger: Logger,
+) -> None:
     """
     Create a variable in the GitHub environment.
 
@@ -243,18 +275,13 @@ def put_variable(owner, repo, env_name, token, var_name, logger):
     # Construct the API URL for creating variables
     url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/variables"
 
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
     # Prepare the request payload
     payload = {"name": var_name, "value": "NONE"}
 
     # Make the API request (POST for creating new variables)
-    response = requests.post(url, headers=headers, json=payload)
+    response = requests.post(
+        url, headers=_build_headers(token), json=payload, timeout=_REQUEST_TIMEOUT
+    )
 
     # Check for successful response (200 = updated, 201 = created)
     if response.status_code in (200, 201):
@@ -265,12 +292,22 @@ def put_variable(owner, repo, env_name, token, var_name, logger):
     else:
         # Other errors should still cause the script to exit
         logger.error(
-            f"Error creating variable '{var_name}' at {url}: {response.status_code} {response.text}"
+            f"Error creating variable '{var_name}' at {url}: "
+            f"{response.status_code} {response.text}"
         )
         sys.exit(1)
 
 
-def put_secret(owner, repo, env_name, token, sec_name, encrypted_value, key_id, logger):
+def put_secret(
+    owner: str,
+    repo: str,
+    env_name: str,
+    token: str,
+    sec_name: str,
+    encrypted_value: str,
+    key_id: str,
+    logger: Logger,
+) -> None:
     """
     Create a secret in the GitHub environment.
 
@@ -292,28 +329,22 @@ def put_secret(owner, repo, env_name, token, sec_name, encrypted_value, key_id, 
         SystemExit: If the API request fails
 
     Example:
-        >>> put_secret("myorg", "myrepo", "prod", token, "DB_PASSWORD", encrypted_value, key_id, logger)
+        >>> put_secret("myorg", "myrepo", "prod", token, "DB_PASSWORD",
+        ...     encrypted_value, key_id, logger)
         >>> # Creates an encrypted secret named DB_PASSWORD in the prod environment
     """
     logger.info(f"Creating secret '{sec_name}'...")
 
     # Construct the API URL for creating secrets
-    url = (
-        f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
-    )
-
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
 
     # Prepare the request payload with encrypted value and key ID
     payload = {"encrypted_value": encrypted_value, "key_id": key_id}
 
     # Make the API request (PUT for creating/updating secrets)
-    response = requests.put(url, headers=headers, json=payload)
+    response = requests.put(
+        url, headers=_build_headers(token), json=payload, timeout=_REQUEST_TIMEOUT
+    )
 
     # Check for successful response (200 = updated, 201 = created)
     if response.status_code in (200, 201):
@@ -323,13 +354,12 @@ def put_secret(owner, repo, env_name, token, sec_name, encrypted_value, key_id, 
         logger.warning(f"Secret '{sec_name}' already exists, skipping creation.")
     else:
         # Other errors should still cause the script to exit
-        logger.error(
-            f"Error creating secret '{sec_name}': {response.status_code} {response.text}"
-        )
+        # Response body omitted to avoid leaking secret-related data
+        logger.error(f"Error creating secret '{sec_name}': {response.status_code}")
         sys.exit(1)
 
 
-def check_variable_exists(owner, repo, env_name, token, var_name):
+def check_variable_exists(owner: str, repo: str, env_name: str, token: str, var_name: str) -> bool:
     """
     Check if a variable exists in the GitHub environment.
 
@@ -353,21 +383,14 @@ def check_variable_exists(owner, repo, env_name, token, var_name):
     # Construct the API URL for checking the specific variable
     url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/variables/{var_name}"
 
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
     # Make the API request
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=_build_headers(token), timeout=_REQUEST_TIMEOUT)
 
     # Return True if the variable exists (200 status), False otherwise
     return response.status_code == 200
 
 
-def check_secret_exists(owner, repo, env_name, token, sec_name):
+def check_secret_exists(owner: str, repo: str, env_name: str, token: str, sec_name: str) -> bool:
     """
     Check if a secret exists in the GitHub environment.
 
@@ -389,25 +412,18 @@ def check_secret_exists(owner, repo, env_name, token, sec_name):
         >>> print(f"DB_PASSWORD exists: {exists}")
     """
     # Construct the API URL for checking the specific secret
-    url = (
-        f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
-    )
-
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
 
     # Make the API request
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=_build_headers(token), timeout=_REQUEST_TIMEOUT)
 
     # Return True if the secret exists (200 status), False otherwise
     return response.status_code == 200
 
 
-def get_environment_variables(owner, repo, env_name, token, logger):
+def get_environment_variables(
+    owner: str, repo: str, env_name: str, token: str, logger: Logger
+) -> list[str]:
     """
     Get all variables from GitHub environment with pagination.
 
@@ -434,21 +450,18 @@ def get_environment_variables(owner, repo, env_name, token, logger):
     all_variables = []
     page = 1
     per_page = 100  # Maximum items per page for GitHub API
+    headers = _build_headers(token)
 
     # Loop through all pages until no more results
-    while True:
+    while page <= _MAX_PAGES:
         # Construct the API URL with pagination parameters
-        url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/variables?per_page={per_page}&page={page}"
-
-        # Set up headers for the API request
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
+        url = (
+            f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}"
+            f"/variables?per_page={per_page}&page={page}"
+        )
 
         # Make the API request
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=_REQUEST_TIMEOUT)
 
         # Check for successful response
         if response.status_code != 200:
@@ -468,11 +481,17 @@ def get_environment_variables(owner, repo, env_name, token, logger):
         # Extract variable names and add to our list
         all_variables.extend([var["name"] for var in variables])
         page += 1
+    else:
+        logger.warning(
+            f"Pagination limit reached ({_MAX_PAGES} pages). Results may be incomplete."
+        )
 
     return all_variables
 
 
-def get_environment_secrets(owner, repo, env_name, token, logger):
+def get_environment_secrets(
+    owner: str, repo: str, env_name: str, token: str, logger: Logger
+) -> list[str]:
     """
     Get all secrets from GitHub environment with pagination.
 
@@ -499,21 +518,18 @@ def get_environment_secrets(owner, repo, env_name, token, logger):
     all_secrets = []
     page = 1
     per_page = 100  # Maximum items per page for GitHub API
+    headers = _build_headers(token)
 
     # Loop through all pages until no more results
-    while True:
+    while page <= _MAX_PAGES:
         # Construct the API URL with pagination parameters
-        url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets?per_page={per_page}&page={page}"
-
-        # Set up headers for the API request
-        headers = {
-            "Accept": "application/vnd.github+json",
-            "Authorization": f"Bearer {token}",
-            "X-GitHub-Api-Version": "2022-11-28",
-        }
+        url = (
+            f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}"
+            f"/secrets?per_page={per_page}&page={page}"
+        )
 
         # Make the API request
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, timeout=_REQUEST_TIMEOUT)
 
         # Check for successful response
         if response.status_code != 200:
@@ -533,16 +549,21 @@ def get_environment_secrets(owner, repo, env_name, token, logger):
         # Extract secret names and add to our list
         all_secrets.extend([secret["name"] for secret in secrets])
         page += 1
+    else:
+        logger.warning(
+            f"Pagination limit reached ({_MAX_PAGES} pages). Results may be incomplete."
+        )
 
     return all_secrets
 
 
-def camel_to_upper_snake(camel_str):
+def camel_to_upper_snake(camel_str: str) -> str:
     """
     Convert camelCase string to UPPER_SNAKE_CASE.
 
     This function converts camelCase strings to uppercase snake_case format,
-    which is commonly used for environment variable names.
+    which is commonly used for environment variable names. Handles acronyms
+    correctly (e.g., HTTPSPort -> HTTPS_PORT).
 
     Args:
         camel_str (str): String in camelCase format
@@ -553,16 +574,20 @@ def camel_to_upper_snake(camel_str):
     Example:
         >>> camel_to_upper_snake("apiServerLambdaName")
         'API_SERVER_LAMBDA_NAME'
-        >>> camel_to_upper_snake("websocketServerLambdaName")
-        'WEBSOCKET_SERVER_LAMBDA_NAME'
+        >>> camel_to_upper_snake("HTTPSPort")
+        'HTTPS_PORT'
     """
-    # Insert an underscore before any uppercase letter that follows a lowercase letter
-    snake_str = re.sub(r'(?<!^)(?=[A-Z])', '_', camel_str)
+    # First pass: insert underscore between consecutive uppercase and uppercase+lowercase
+    # e.g., "HTTPSPort" -> "HTTPS_Port"
+    snake_str = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", camel_str)
+    # Second pass: insert underscore between lowercase and uppercase
+    # e.g., "apiServer" -> "api_Server"
+    snake_str = re.sub(r"([a-z])([A-Z])", r"\1_\2", snake_str)
     # Convert to uppercase
     return snake_str.upper()
 
 
-def read_value_pairs(file_path):
+def read_value_pairs(file_path: Path | str, logger: Logger | None = None) -> dict[str, str]:
     """
     Read and parse name=value pairs from file.
 
@@ -573,6 +598,7 @@ def read_value_pairs(file_path):
 
     Args:
         file_path (str or Path): Path to file to read from
+        logger (logging.Logger, optional): Logger for warnings about skipped lines
 
     Returns:
         dict: Dictionary of name:value pairs
@@ -592,24 +618,24 @@ def read_value_pairs(file_path):
     value_pairs = {}
 
     # Determine file type by extension
-    if file_path.suffix.lower() == '.json':
+    if file_path.suffix.lower() == ".json":
         # Parse JSON file (AWS CDK output format)
         with open(file_path) as f:
             data = json.load(f)
 
         # CDK output has a top-level key (e.g., "some-app") with nested object
         # We need to extract the nested object and transform keys
-        for top_level_key, nested_obj in data.items():
+        for _top_level_key, nested_obj in data.items():
             if isinstance(nested_obj, dict):
                 # Transform camelCase keys to UPPER_SNAKE_CASE
                 for camel_key, value in nested_obj.items():
                     snake_key = camel_to_upper_snake(camel_key)
                     value_pairs[snake_key] = str(value)
 
-    elif file_path.suffix.lower() == '.txt':
+    elif file_path.suffix.lower() == ".txt":
         # Parse text file (key=value format)
         with open(file_path) as f:
-            for line in f:
+            for line_num, line in enumerate(f, start=1):
                 # Remove comments (everything after #)
                 line = line.split("#")[0].strip()
                 # Skip empty lines
@@ -622,13 +648,33 @@ def read_value_pairs(file_path):
                     value = value.strip()
                     if name and value:
                         value_pairs[name] = value
+                    elif name and not value and logger:
+                        logger.warning(
+                                f"Skipping '{name}' at {file_path}:{line_num}: empty value"
+                            )
+                else:
+                    if logger:
+                        logger.warning(
+                            f"Skipping line {line_num} in {file_path}: "
+                            f"no '=' found in '{line}'"
+                        )
     else:
-        raise ValueError(f"Unsupported file format: {file_path.suffix}. Only .txt and .json are supported.")
+        raise ValueError(
+            f"Unsupported file format: {file_path.suffix}. Only .txt and .json are supported."
+        )
 
     return value_pairs
 
 
-def update_variable(owner, repo, env_name, token, var_name, var_value, logger):
+def update_variable(
+    owner: str,
+    repo: str,
+    env_name: str,
+    token: str,
+    var_name: str,
+    var_value: str,
+    logger: Logger,
+) -> None:
     """
     Update a variable in the GitHub environment.
 
@@ -656,18 +702,13 @@ def update_variable(owner, repo, env_name, token, var_name, var_value, logger):
     # Construct the API URL for updating variables
     url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/variables/{var_name}"
 
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
     # Prepare the request payload
     payload = {"name": var_name, "value": var_value}
 
     # Make the API request (PATCH for updating existing variables)
-    response = requests.patch(url, headers=headers, json=payload)
+    response = requests.patch(
+        url, headers=_build_headers(token), json=payload, timeout=_REQUEST_TIMEOUT
+    )
 
     # Check for successful response (204 = updated successfully)
     if response.status_code == 204:
@@ -675,14 +716,22 @@ def update_variable(owner, repo, env_name, token, var_name, var_value, logger):
     else:
         # Log error and exit on failure
         logger.error(
-            f"Error updating variable '{var_name}' at {url}: {response.status_code} {response.text}"
+            f"Error updating variable '{var_name}' at {url}: "
+            f"{response.status_code} {response.text}"
         )
         sys.exit(1)
 
 
 def update_secret(
-    owner, repo, env_name, token, sec_name, encrypted_value, key_id, logger
-):
+    owner: str,
+    repo: str,
+    env_name: str,
+    token: str,
+    sec_name: str,
+    encrypted_value: str,
+    key_id: str,
+    logger: Logger,
+) -> None:
     """
     Update a secret in the GitHub environment.
 
@@ -704,41 +753,40 @@ def update_secret(
         SystemExit: If the API request fails
 
     Example:
-        >>> update_secret("myorg", "myrepo", "prod", token, "DB_PASSWORD", encrypted_value, key_id, logger)
+        >>> update_secret("myorg", "myrepo", "prod", token, "DB_PASSWORD",
+        ...     encrypted_value, key_id, logger)
         >>> # Updates the encrypted secret named DB_PASSWORD in the prod environment
     """
     logger.info(f"Updating secret '{sec_name}'...")
 
     # Construct the API URL for updating secrets
-    url = (
-        f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
-    )
-
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
 
     # Prepare the request payload with encrypted value and key ID
     payload = {"encrypted_value": encrypted_value, "key_id": key_id}
 
     # Make the API request (PUT for updating secrets)
-    response = requests.put(url, headers=headers, json=payload)
+    response = requests.put(
+        url, headers=_build_headers(token), json=payload, timeout=_REQUEST_TIMEOUT
+    )
 
     # Check for successful response (201 = created, 204 = updated)
     if response.status_code in (201, 204):
         logger.info(f"Secret '{sec_name}' updated successfully.")
     else:
-        # Log error and exit on failure
-        logger.error(
-            f"Error updating secret '{sec_name}': {response.status_code} {response.text}"
-        )
+        # Response body omitted to avoid leaking secret-related data
+        logger.error(f"Error updating secret '{sec_name}': {response.status_code}")
         sys.exit(1)
 
 
-def delete_variable(owner, repo, env_name, token, var_name, logger):
+def delete_variable(
+    owner: str,
+    repo: str,
+    env_name: str,
+    token: str,
+    var_name: str,
+    logger: Logger,
+) -> None:
     """
     Delete a variable from the GitHub environment.
 
@@ -764,15 +812,8 @@ def delete_variable(owner, repo, env_name, token, var_name, logger):
     # Construct the API URL for deleting the variable
     url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/variables/{var_name}"
 
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
-
     # Make the API request (DELETE for removing variables)
-    response = requests.delete(url, headers=headers)
+    response = requests.delete(url, headers=_build_headers(token), timeout=_REQUEST_TIMEOUT)
 
     # Check for successful response (204 = deleted successfully)
     if response.status_code == 204:
@@ -783,12 +824,20 @@ def delete_variable(owner, repo, env_name, token, var_name, logger):
     else:
         # Log error and exit on failure
         logger.error(
-            f"Error deleting variable '{var_name}' at {url}: {response.status_code} {response.text}"
+            f"Error deleting variable '{var_name}' at {url}: "
+            f"{response.status_code} {response.text}"
         )
         sys.exit(1)
 
 
-def delete_secret(owner, repo, env_name, token, sec_name, logger):
+def delete_secret(
+    owner: str,
+    repo: str,
+    env_name: str,
+    token: str,
+    sec_name: str,
+    logger: Logger,
+) -> None:
     """
     Delete a secret from the GitHub environment.
 
@@ -812,19 +861,10 @@ def delete_secret(owner, repo, env_name, token, sec_name, logger):
     logger.info(f"Deleting secret '{sec_name}'...")
 
     # Construct the API URL for deleting the secret
-    url = (
-        f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
-    )
-
-    # Set up headers for the API request
-    headers = {
-        "Accept": "application/vnd.github+json",
-        "Authorization": f"Bearer {token}",
-        "X-GitHub-Api-Version": "2022-11-28",
-    }
+    url = f"{GITHUB_API}/repos/{owner}/{repo}/environments/{env_name}/secrets/{sec_name}"
 
     # Make the API request (DELETE for removing secrets)
-    response = requests.delete(url, headers=headers)
+    response = requests.delete(url, headers=_build_headers(token), timeout=_REQUEST_TIMEOUT)
 
     # Check for successful response (204 = deleted successfully)
     if response.status_code == 204:
@@ -833,14 +873,15 @@ def delete_secret(owner, repo, env_name, token, sec_name, logger):
         # Secret doesn't exist - log a warning but don't fail
         logger.warning(f"Secret '{sec_name}' not found, skipping deletion.")
     else:
-        # Log error and exit on failure
-        logger.error(
-            f"Error deleting secret '{sec_name}': {response.status_code} {response.text}"
-        )
+        # Response body omitted to avoid leaking secret-related data
+        logger.error(f"Error deleting secret '{sec_name}': {response.status_code}")
         sys.exit(1)
 
 
-def validate_environment(owner, repo, env_name, vars_dir, logger):
+def validate_environment(
+    vars_dir: Path | str,
+    logger: Logger,
+) -> tuple[str, Path]:
     """
     Validate common environment setup and return token.
 
@@ -850,9 +891,6 @@ def validate_environment(owner, repo, env_name, vars_dir, logger):
     - Returns the token and validated directory path
 
     Args:
-        owner (str): GitHub repository owner (username or organization)
-        repo (str): GitHub repository name
-        env_name (str): GitHub environment name
         vars_dir (str): Directory containing .vars and .secs files
         logger (logging.Logger): Logger instance for output
 
@@ -863,15 +901,13 @@ def validate_environment(owner, repo, env_name, vars_dir, logger):
         SystemExit: If validation fails
 
     Example:
-        >>> token, directory = validate_environment("myorg", "myrepo", "prod", "data", logger)
+        >>> token, directory = validate_environment("data", logger)
         >>> print(f"Token: {token[:10]}..., Directory: {directory}")
     """
     # Check if GitHub token is set in environment
     gh_token = os.getenv("GH_API_SECRET")
     if not gh_token:
-        logger.error(
-            "Please set GH_API_SECRET to a GitHub token with 'actions:write' permission"
-        )
+        logger.error("Please set GH_API_SECRET to a GitHub token with 'actions:write' permission")
         sys.exit(1)
 
     # Validate that the variables directory exists

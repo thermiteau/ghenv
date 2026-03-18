@@ -48,7 +48,9 @@ Author: GitHub Environment Management Team
 """
 
 import argparse
+import os
 import sys
+from pathlib import Path
 
 try:
     from .ghenv_lib import (
@@ -72,9 +74,6 @@ except ImportError:
         update_secret,
         update_variable,
     )
-
-# Initialize logging for this script
-logger = setup_logging("update.log", "update")
 
 
 def main():
@@ -103,31 +102,25 @@ def main():
         0: Success - all variables and secrets updated
         1: Error - validation failed or API errors occurred
     """
+    # Initialize logging for this script
+    logger = setup_logging("update.log", "update")
+
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(
         description="Update GitHub environment variables and secrets from a file (.txt or .json)."
     )
-    parser.add_argument(
-        "owner", help="GitHub repository owner (username or organization)"
-    )
+    parser.add_argument("owner", help="GitHub repository owner (username or organization)")
     parser.add_argument("repo", help="GitHub repository name")
-    parser.add_argument(
-        "env_name", help="GitHub environment name (e.g., production, staging)"
-    )
+    parser.add_argument("env_name", help="GitHub environment name (e.g., production, staging)")
     parser.add_argument("file_path", help="Path to file containing values (.txt or .json)")
 
     # Parse the command line arguments
     args = parser.parse_args()
 
     # Validate that GitHub token is set
-    import os
-    from pathlib import Path
-
     gh_token = os.getenv("GH_API_SECRET")
     if not gh_token:
-        logger.error(
-            "Please set GH_API_SECRET to a GitHub token with 'actions:write' permission"
-        )
+        logger.error("Please set GH_API_SECRET to a GitHub token with 'actions:write' permission")
         sys.exit(1)
 
     # Validate that the file exists
@@ -138,7 +131,7 @@ def main():
 
     # Read all name=value pairs from the file
     try:
-        value_pairs = read_value_pairs(file_path)
+        value_pairs = read_value_pairs(file_path, logger)
     except Exception as e:
         logger.error(f"Error reading file {file_path}: {e}")
         sys.exit(1)
@@ -149,17 +142,11 @@ def main():
 
     # Fetch the public key needed for encrypting secrets
     # This is required by GitHub's API for storing secrets securely
-    key_id, public_key = fetch_public_key(
-        args.owner, args.repo, args.env_name, gh_token, logger
-    )
+    key_id, public_key = fetch_public_key(args.owner, args.repo, args.env_name, gh_token, logger)
 
     # Get existing variables and secrets from GitHub
-    github_vars = get_environment_variables(
-        args.owner, args.repo, args.env_name, gh_token, logger
-    )
-    github_secs = get_environment_secrets(
-        args.owner, args.repo, args.env_name, gh_token, logger
-    )
+    github_vars = get_environment_variables(args.owner, args.repo, args.env_name, gh_token, logger)
+    github_secs = get_environment_secrets(args.owner, args.repo, args.env_name, gh_token, logger)
 
     github_vars_set = set(github_vars)
     github_secs_set = set(github_secs)
@@ -173,9 +160,7 @@ def main():
     for name, value in value_pairs.items():
         # Check if it's a variable (exists in GitHub variables)
         if name in github_vars_set:
-            update_variable(
-                args.owner, args.repo, args.env_name, gh_token, name, value, logger
-            )
+            update_variable(args.owner, args.repo, args.env_name, gh_token, name, value, logger)
             updated_vars += 1
         # Check if it's a secret (exists in GitHub secrets)
         elif name in github_secs_set:
@@ -202,9 +187,7 @@ def main():
             skipped_items += 1
 
     # Log summary
-    logger.info(
-        f"Update complete: {updated_vars} variable(s), {updated_secs} secret(s)"
-    )
+    logger.info(f"Update complete: {updated_vars} variable(s), {updated_secs} secret(s)")
     if skipped_items > 0:
         logger.info(f"Skipped {skipped_items} item(s) that don't exist in GitHub")
 

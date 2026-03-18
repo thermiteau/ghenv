@@ -20,6 +20,8 @@ Test Coverage:
     - get_environment_variables: Variable retrieval with pagination
     - get_environment_secrets: Secret retrieval with pagination
     - validate_environment: Environment validation
+    - camel_to_upper_snake: Case conversion
+    - read_value_pairs: File parsing for name=value pairs
 
 Dependencies:
     - pytest
@@ -30,6 +32,7 @@ Dependencies:
 """
 
 import base64
+import json
 import logging
 import os
 
@@ -52,15 +55,16 @@ class TestSetupLogging:
         """Test that setup_logging creates a properly configured logger."""
         log_file = tmp_path / "test.log"
 
-        # Reset logging configuration for clean test
-        logging.getLogger().handlers.clear()
+        # Remove any existing handlers on this logger name
+        existing = logging.getLogger("test_logger_creates")
+        existing.handlers.clear()
 
         # Call the function
-        logger = ghenv_lib.setup_logging(str(log_file), "test_logger")
+        logger = ghenv_lib.setup_logging(str(log_file), "test_logger_creates")
 
         # Verify logger was created
         assert isinstance(logger, logging.Logger)
-        assert logger.name == "test_logger"
+        assert logger.name == "test_logger_creates"
 
         # Test that logging works
         test_message = "Test log message"
@@ -75,8 +79,9 @@ class TestSetupLogging:
     def test_setup_logging_console_output(self, capsys):
         """Test that setup_logging outputs to console."""
         with tempfile.NamedTemporaryFile() as tmp_file:
-            # Reset logging configuration for clean test
-            logging.getLogger().handlers.clear()
+            # Remove any existing handlers on this logger name
+            existing = logging.getLogger("console_test")
+            existing.handlers.clear()
 
             logger = ghenv_lib.setup_logging(tmp_file.name, "console_test")
 
@@ -91,8 +96,9 @@ class TestSetupLogging:
         """Test that setup_logging respects LOG_LEVEL environment variable."""
         log_file = tmp_path / "debug.log"
 
-        # Reset logging configuration for clean test
-        logging.getLogger().handlers.clear()
+        # Remove any existing handlers on this logger name
+        existing = logging.getLogger("debug_test")
+        existing.handlers.clear()
 
         # Set environment variable
         with patch.dict(os.environ, {"LOG_LEVEL": "DEBUG"}):
@@ -105,6 +111,22 @@ class TestSetupLogging:
             with open(log_file) as f:
                 log_content = f.read()
                 assert "Debug message" in log_content
+
+    def test_setup_logging_no_duplicate_handlers(self, tmp_path):
+        """Test that calling setup_logging twice doesn't add duplicate handlers."""
+        log_file = tmp_path / "nodup.log"
+        logger_name = "nodup_test"
+
+        # Remove any existing handlers
+        existing = logging.getLogger(logger_name)
+        existing.handlers.clear()
+
+        logger1 = ghenv_lib.setup_logging(str(log_file), logger_name)
+        handler_count = len(logger1.handlers)
+
+        logger2 = ghenv_lib.setup_logging(str(log_file), logger_name)
+        assert len(logger2.handlers) == handler_count
+        assert logger1 is logger2
 
 
 class TestReadVariableNames:
@@ -248,9 +270,7 @@ class TestFetchPublicKey:
         logger = Mock()
 
         with pytest.raises(SystemExit):
-            ghenv_lib.fetch_public_key(
-                "testowner", "testrepo", "testenv", "test_token", logger
-            )
+            ghenv_lib.fetch_public_key("testowner", "testrepo", "testenv", "test_token", logger)
 
         logger.error.assert_called_once()
 
@@ -446,6 +466,32 @@ class TestPutSecret:
 
         logger.error.assert_called_once()
 
+    def test_put_secret_error_does_not_log_response_body(self, requests_mock):
+        """Test that secret creation error does not leak response body."""
+        requests_mock.put(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/secrets/TEST_SECRET",
+            status_code=500,
+            text="sensitive payload echo",
+        )
+
+        logger = Mock()
+
+        with pytest.raises(SystemExit):
+            ghenv_lib.put_secret(
+                "testowner",
+                "testrepo",
+                "testenv",
+                "test_token",
+                "TEST_SECRET",
+                "encrypted_value",
+                "key_id",
+                logger,
+            )
+
+        error_msg = logger.error.call_args[0][0]
+        assert "sensitive payload echo" not in error_msg
+        assert "500" in error_msg
+
 
 class TestDeleteVariable:
     """Test cases for delete_variable function."""
@@ -487,9 +533,7 @@ class TestDeleteVariable:
         )
 
         # Verify warning was logged
-        logger.warning.assert_called_once_with(
-            "Variable 'TEST_VAR' not found, skipping deletion."
-        )
+        logger.warning.assert_called_once_with("Variable 'TEST_VAR' not found, skipping deletion.")
 
     def test_delete_variable_api_error(self, requests_mock):
         """Test variable deletion with API error."""
@@ -570,6 +614,25 @@ class TestDeleteSecret:
 
         logger.error.assert_called_once()
 
+    def test_delete_secret_error_does_not_log_response_body(self, requests_mock):
+        """Test that secret deletion error does not leak response body."""
+        requests_mock.delete(
+            "https://api.github.com/repos/testowner/testrepo/environments/testenv/secrets/TEST_SECRET",
+            status_code=500,
+            text="sensitive data",
+        )
+
+        logger = Mock()
+
+        with pytest.raises(SystemExit):
+            ghenv_lib.delete_secret(
+                "testowner", "testrepo", "testenv", "test_token", "TEST_SECRET", logger
+            )
+
+        error_msg = logger.error.call_args[0][0]
+        assert "sensitive data" not in error_msg
+        assert "500" in error_msg
+
 
 class TestCheckVariableExists:
     """Test cases for check_variable_exists function."""
@@ -636,9 +699,7 @@ class TestGetEnvironmentVariables:
 
     def test_get_environment_variables_single_page(self, requests_mock):
         """Test getting variables from a single page."""
-        mock_response = {
-            "variables": [{"name": "VAR1"}, {"name": "VAR2"}, {"name": "VAR3"}]
-        }
+        mock_response = {"variables": [{"name": "VAR1"}, {"name": "VAR2"}, {"name": "VAR3"}]}
 
         requests_mock.get(
             "https://api.github.com/repos/testowner/testrepo/environments/testenv/variables?per_page=100&page=1",
@@ -820,9 +881,7 @@ class TestValidateEnvironment:
 
         with patch.dict(os.environ, {"GH_API_SECRET": "test_token"}):
             logger = Mock()
-            token, directory = ghenv_lib.validate_environment(
-                "testowner", "testrepo", "testenv", str(test_dir), logger
-            )
+            token, directory = ghenv_lib.validate_environment(str(test_dir), logger)
 
         assert token == "test_token"
         assert directory == test_dir
@@ -833,9 +892,7 @@ class TestValidateEnvironment:
             logger = Mock()
 
             with pytest.raises(SystemExit):
-                ghenv_lib.validate_environment(
-                    "testowner", "testrepo", "testenv", "test_dir", logger
-                )
+                ghenv_lib.validate_environment("test_dir", logger)
 
             logger.error.assert_called_once()
 
@@ -845,11 +902,134 @@ class TestValidateEnvironment:
             logger = Mock()
 
             with pytest.raises(SystemExit):
-                ghenv_lib.validate_environment(
-                    "testowner", "testrepo", "testenv", "/non/existent/path", logger
-                )
+                ghenv_lib.validate_environment("/non/existent/path", logger)
 
             logger.error.assert_called_once()
+
+
+class TestCamelToUpperSnake:
+    """Test cases for camel_to_upper_snake function."""
+
+    def test_simple_camel_case(self):
+        """Test basic camelCase conversion."""
+        assert ghenv_lib.camel_to_upper_snake("apiServerLambdaName") == "API_SERVER_LAMBDA_NAME"
+
+    def test_single_word_lowercase(self):
+        """Test single lowercase word."""
+        assert ghenv_lib.camel_to_upper_snake("name") == "NAME"
+
+    def test_single_word_uppercase(self):
+        """Test single uppercase word."""
+        assert ghenv_lib.camel_to_upper_snake("NAME") == "NAME"
+
+    def test_acronym_at_start(self):
+        """Test acronym at the start of the string."""
+        assert ghenv_lib.camel_to_upper_snake("APIKey") == "API_KEY"
+
+    def test_acronym_in_middle(self):
+        """Test acronym in the middle of the string."""
+        assert ghenv_lib.camel_to_upper_snake("myHTTPSClient") == "MY_HTTPS_CLIENT"
+
+    def test_acronym_at_end(self):
+        """Test acronym at the end of the string."""
+        assert ghenv_lib.camel_to_upper_snake("useHTTPS") == "USE_HTTPS"
+
+    def test_consecutive_uppercase_then_lowercase(self):
+        """Test transition from consecutive uppercase to lowercase."""
+        assert ghenv_lib.camel_to_upper_snake("HTTPSPort") == "HTTPS_PORT"
+
+    def test_websocket_example(self):
+        """Test the websocket example from docstring."""
+        assert (
+            ghenv_lib.camel_to_upper_snake("websocketServerLambdaName")
+            == "WEBSOCKET_SERVER_LAMBDA_NAME"
+        )
+
+    def test_bucket_name(self):
+        """Test simple two-word camelCase."""
+        assert ghenv_lib.camel_to_upper_snake("bucketName") == "BUCKET_NAME"
+
+
+class TestReadValuePairs:
+    """Test cases for read_value_pairs function."""
+
+    def test_txt_file_basic(self, tmp_path):
+        """Test reading basic key=value pairs from a .txt file."""
+        f = tmp_path / "test.txt"
+        f.write_text("DB_HOST=localhost\nDB_PORT=5432\n")
+        result = ghenv_lib.read_value_pairs(f)
+        assert result == {"DB_HOST": "localhost", "DB_PORT": "5432"}
+
+    def test_txt_file_with_comments(self, tmp_path):
+        """Test that comments are ignored in .txt files."""
+        f = tmp_path / "test.txt"
+        f.write_text("DB_HOST=localhost\n# This is a comment\nDB_PORT=5432\n")
+        result = ghenv_lib.read_value_pairs(f)
+        assert result == {"DB_HOST": "localhost", "DB_PORT": "5432"}
+
+    def test_txt_file_with_equals_in_value(self, tmp_path):
+        """Test that only the first = is used to split."""
+        f = tmp_path / "test.txt"
+        f.write_text("CONNECTION=host=db;port=5432\n")
+        result = ghenv_lib.read_value_pairs(f)
+        assert result == {"CONNECTION": "host=db;port=5432"}
+
+    def test_txt_file_empty_value_warns(self, tmp_path):
+        """Test that empty values produce a warning when logger is provided."""
+        f = tmp_path / "test.txt"
+        f.write_text("DB_HOST=\n")
+        logger = Mock()
+        result = ghenv_lib.read_value_pairs(f, logger)
+        assert result == {}
+        logger.warning.assert_called_once()
+        assert "empty value" in logger.warning.call_args[0][0]
+
+    def test_txt_file_no_equals_warns(self, tmp_path):
+        """Test that lines without = produce a warning when logger is provided."""
+        f = tmp_path / "test.txt"
+        f.write_text("DB_HOST\n")
+        logger = Mock()
+        result = ghenv_lib.read_value_pairs(f, logger)
+        assert result == {}
+        logger.warning.assert_called_once()
+        assert "no '='" in logger.warning.call_args[0][0]
+
+    def test_txt_file_no_logger_skips_silently(self, tmp_path):
+        """Test that malformed lines are silently skipped without a logger."""
+        f = tmp_path / "test.txt"
+        f.write_text("DB_HOST\nDB_PORT=\nVALID=value\n")
+        result = ghenv_lib.read_value_pairs(f)
+        assert result == {"VALID": "value"}
+
+    def test_txt_file_empty_lines(self, tmp_path):
+        """Test that empty lines are skipped."""
+        f = tmp_path / "test.txt"
+        f.write_text("DB_HOST=localhost\n\n\nDB_PORT=5432\n")
+        result = ghenv_lib.read_value_pairs(f)
+        assert result == {"DB_HOST": "localhost", "DB_PORT": "5432"}
+
+    def test_json_file_cdk_format(self, tmp_path):
+        """Test reading AWS CDK output format JSON files."""
+        f = tmp_path / "test.json"
+        data = {"stack-name": {"apiServerName": "my-server", "bucketName": "my-bucket"}}
+        f.write_text(json.dumps(data))
+        result = ghenv_lib.read_value_pairs(f)
+        assert result == {"API_SERVER_NAME": "my-server", "BUCKET_NAME": "my-bucket"}
+
+    def test_json_file_non_dict_values_skipped(self, tmp_path):
+        """Test that non-dict top-level values in JSON are skipped."""
+        f = tmp_path / "test.json"
+        data = {"stack-name": {"key": "value"}, "metadata": "not-a-dict"}
+        f.write_text(json.dumps(data))
+        result = ghenv_lib.read_value_pairs(f)
+        assert result == {"KEY": "value"}
+
+    def test_unsupported_format_raises(self, tmp_path):
+        """Test that unsupported file formats raise ValueError."""
+        f = tmp_path / "test.yaml"
+        f.write_text("key: value")
+        with pytest.raises(ValueError, match="Unsupported file format"):
+            ghenv_lib.read_value_pairs(f)
 
 
 # Integration test class
@@ -929,9 +1109,7 @@ class TestIntegration:
             logger = Mock()
 
             # Validate environment
-            token, directory = ghenv_lib.validate_environment(
-                "testowner", "testrepo", "testenv", str(test_dir), logger
-            )
+            token, directory = ghenv_lib.validate_environment(str(test_dir), logger)
             assert token == "test_token"
             assert directory == test_dir
 

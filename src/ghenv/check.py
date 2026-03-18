@@ -52,9 +52,6 @@ except ImportError:
         validate_environment,
     )
 
-# Initialize logging for this script
-logger = setup_logging("check.log", "check")
-
 
 def main():
     """
@@ -82,17 +79,16 @@ def main():
         0: Success - environment is synchronized
         1: Error - missing or orphaned items found, or validation failed
     """
+    # Initialize logging for this script
+    logger = setup_logging("check.log", "check")
+
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(
         description="Check GitHub environment variables and secrets against local files."
     )
-    parser.add_argument(
-        "owner", help="GitHub repository owner (username or organization)"
-    )
+    parser.add_argument("owner", help="GitHub repository owner (username or organization)")
     parser.add_argument("repo", help="GitHub repository name")
-    parser.add_argument(
-        "env_name", help="GitHub environment name (e.g., production, staging)"
-    )
+    parser.add_argument("env_name", help="GitHub environment name (e.g., production, staging)")
     parser.add_argument("vars_dir", help="Directory containing .vars and .secs files")
 
     # Parse the command line arguments
@@ -100,9 +96,7 @@ def main():
 
     # Validate environment and get GitHub token
     # This checks for GH_API_SECRET and validates the variables directory
-    gh_token, vars_dir = validate_environment(
-        args.owner, args.repo, args.env_name, args.vars_dir, logger
-    )
+    gh_token, vars_dir = validate_environment(args.vars_dir, logger)
 
     # Find all .vars and .secs files in the specified directory
     # This searches recursively for files with these extensions
@@ -145,9 +139,7 @@ def main():
             # Report missing variables (in files but not in GitHub)
             if missing_vars:
                 for var in missing_vars:
-                    logger.error(
-                        f"{var} is missing from GitHub environment {args.env_name}"
-                    )
+                    logger.error(f"{var} is missing from GitHub environment {args.env_name}")
 
             # Report extra variables (in GitHub but not in files)
             if extra_vars:
@@ -184,9 +176,7 @@ def main():
             # Report missing secrets (in files but not in GitHub)
             if missing_secs:
                 for sec in missing_secs:
-                    logger.error(
-                        f"{sec} is missing from GitHub environment {args.env_name}"
-                    )
+                    logger.error(f"{sec} is missing from GitHub environment {args.env_name}")
 
             # Report extra secrets (in GitHub but not in files)
             if extra_secs:

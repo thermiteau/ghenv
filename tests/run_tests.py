@@ -27,9 +27,7 @@ def main():
     parser.add_argument(
         "-k", "--keyword", type=str, help="Only run tests matching the given substring"
     )
-    parser.add_argument(
-        "--html", action="store_true", help="Generate HTML coverage report"
-    )
+    parser.add_argument("--html", action="store_true", help="Generate HTML coverage report")
 
     args = parser.parse_args()
 
@@ -55,16 +53,14 @@ def main():
         )
 
     if args.html:
-        cmd.extend(
-            ["--cov=ghenv.ghenv_lib", "--cov-report=html", "--cov-fail-under=80"]
-        )
+        cmd.extend(["--cov=ghenv.ghenv_lib", "--cov-report=html", "--cov-fail-under=80"])
 
     if args.keyword:
         cmd.extend(["-k", args.keyword])
 
     # Run the tests
     try:
-        result = subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True)
         print("\n✅ All tests passed!")
         return 0
     except subprocess.CalledProcessError as e:
