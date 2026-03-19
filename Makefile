@@ -1,4 +1,4 @@
-.PHONY: test lint typecheck check build install sync clean
+.PHONY: test lint typecheck check build install sync clean release release-minor release-major
 
 ## Testing & Quality
 
@@ -38,6 +38,17 @@ sync: ## Sync all dependencies (including test and dev)
 
 clean: ## Remove build artifacts and caches
 	rm -rf dist/ build/ *.egg-info src/*.egg-info .pytest_cache htmlcov .coverage
+
+## Release
+
+release: ## Create a patch release (bump patch version, tag, merge to main)
+	./scripts/release.sh patch
+
+release-minor: ## Create a minor release (bump minor version, tag, merge to main)
+	./scripts/release.sh minor
+
+release-major: ## Create a major release (bump major version, tag, merge to main)
+	./scripts/release.sh major
 
 ## Help
 

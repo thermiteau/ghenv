@@ -8,3 +8,4 @@ logs/
 .coverage
 dist/
 .claude/
+.ruff_cache
